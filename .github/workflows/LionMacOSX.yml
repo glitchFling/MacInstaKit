@@ -26,6 +26,7 @@ jobs:
             dmg2img \
             curl \
             wget
+          pip3 install xar --break-system-packages 2>/dev/null || true
 
       - name: Create working directory
         run: mkdir -p "${{ env.WORK_DIR }}"
@@ -45,34 +46,69 @@ jobs:
             -o"${{ env.WORK_DIR }}/extracted" -y
           find "${{ env.WORK_DIR }}/extracted" -maxdepth 3 -type f -o -type d | head -30
 
-      - name: Extract .pkg (xar) using Python
+      - name: Extract .pkg and find InstallESD.dmg
         run: |
           PKG_PATH=$(find "${{ env.WORK_DIR }}/extracted" -name "*.pkg" -type f | head -1)
           echo "Found .pkg at: $PKG_PATH"
           ls -lh "$PKG_PATH"
           mkdir -p "${{ env.WORK_DIR }}/extracted_pkg"
-          python3 extract_xar.py "$PKG_PATH" "${{ env.WORK_DIR }}/extracted_pkg"
-          echo "--- extracted files ---"
-          find "${{ env.WORK_DIR }}/extracted_pkg" -maxdepth 2 -type f
 
-      - name: Extract Payload to get InstallESD.dmg
+          # Try xar from pip first, fall back to our Python extractor
+          python3 extract_xar.py "$PKG_PATH" "${{ env.WORK_DIR }}/extracted_pkg" 2>&1
+          echo "=== extracted_pkg tree ==="
+          find "${{ env.WORK_DIR }}/extracted_pkg" -maxdepth 3 -type f | head -50
+
+      - name: Locate InstallESD.dmg or the Payload file
+        run: |
+          echo "=== Searching for Payload ==="
+          find "${{ env.WORK_DIR }}/extracted_pkg" -name "Payload" -type f 2>/dev/null | head -5
+          echo "=== Searching for InstallESD.dmg ==="
+          find "${{ env.WORK_DIR }}" -name "InstallESD.dmg" -type f 2>/dev/null | head -5
+          echo "=== All files in extracted_pkg ==="
+          find "${{ env.WORK_DIR }}/extracted_pkg" -type f 2>/dev/null | head -40
+
+      - name: Extract Payload and find InstallESD.dmg
         run: |
           PAYLOAD_PATH=$(find "${{ env.WORK_DIR }}/extracted_pkg" -name "Payload" -type f | head -1)
-          echo "Found Payload at: $PAYLOAD_PATH"
-          mkdir -p "${{ env.WORK_DIR }}/payload_out"
-          cd "${{ env.WORK_DIR }}/payload_out"
-          cat "$PAYLOAD_PATH" | gunzip -dc | cpio -idm 2>/dev/null || \
-            echo "Note: cpio may report blocks, that's normal"
-          echo "--- Payload contents ---"
-          find "${{ env.WORK_DIR }}/payload_out" -maxdepth 5 -type f | head -40
+          if [ -z "$PAYLOAD_PATH" ]; then
+            echo "No Payload found — checking for InstallESD.dmg directly"
+            ESD_PATH=$(find "${{ env.WORK_DIR }}/extracted_pkg" -name "InstallESD.dmg" -type f | head -1)
+            if [ -n "$ESD_PATH" ]; then
+              echo "Found InstallESD.dmg at: $ESD_PATH"
+              dmg2img -i "$ESD_PATH" -o "${{ env.WORK_DIR }}/InstallMacOSX.bin"
+              ls -lh "${{ env.WORK_DIR }}/InstallMacOSX.bin"
+            else
+              echo "Neither Payload nor InstallESD.dmg found"
+              find "${{ env.WORK_DIR }}/extracted_pkg" -type f -o -type d | head -50
+              exit 1
+            fi
+          else
+            echo "Found Payload at: $PAYLOAD_PATH"
+            ls -lh "$PAYLOAD_PATH"
+            mkdir -p "${{ env.WORK_DIR }}/payload_out"
+            # Try cpio + gunzip
+            cd "${{ env.WORK_DIR }}/payload_out"
+            if gunzip -dc < "$PAYLOAD_PATH" | cpio -idm 2>/dev/null; then
+              echo "Payload extracted with gunzip+cpio"
+            else
+              # Maybe already decompressed by xar tool
+              echo "gunzip failed, trying raw cpio..."
+              cpio -idm < "$PAYLOAD_PATH" 2>/dev/null || echo "cpio also failed"
+            fi
+            echo "=== Payload contents ==="
+            find "${{ env.WORK_DIR }}/payload_out" -maxdepth 6 -type f | head -40
 
-      - name: Convert InstallESD.dmg to raw image
-        run: |
-          ESD_PATH=$(find "${{ env.WORK_DIR }}/payload_out" -name "InstallESD.dmg" -type f | head -1)
-          echo "Found InstallESD.dmg at: $ESD_PATH"
-          ls -lh "$ESD_PATH"
-          dmg2img -i "$ESD_PATH" -o "${{ env.WORK_DIR }}/InstallMacOSX.bin"
-          ls -lh "${{ env.WORK_DIR }}/InstallMacOSX.bin"
+            ESD_PATH=$(find "${{ env.WORK_DIR }}/payload_out" -name "InstallESD.dmg" -type f | head -1)
+            if [ -n "$ESD_PATH" ]; then
+              echo "Found InstallESD.dmg at: $ESD_PATH"
+              dmg2img -i "$ESD_PATH" -o "${{ env.WORK_DIR }}/InstallMacOSX.bin"
+              ls -lh "${{ env.WORK_DIR }}/InstallMacOSX.bin"
+            else
+              echo "Still no InstallESD.dmg found in payload"
+              find "${{ env.WORK_DIR }}/payload_out" -type f | head -40
+              exit 1
+            fi
+          fi
 
       - name: List final output
         run: find "${{ env.WORK_DIR }}" -maxdepth 2 -type f -exec ls -lh {} \;
