@@ -1,4 +1,4 @@
-name: Download & Extract macOS Installer
+name: Download Lion 10.7
 
 on:
   workflow_dispatch:   # manual trigger only
@@ -32,7 +32,7 @@ jobs:
 
       - name: Download macOS Installer DMG
         run: |
-          echo "Downloading macOS installer DMG (~12 GB) ..."
+          echo "Downloading macOS installer... (Lion 10.7)"
           until curl -f -L -C - -o "${{ env.WORK_DIR }}/${{ env.DMG_FILE }}" "${{ env.DMG_URL }}"; do
             echo "Download interrupted or failed. Retrying in 5 seconds..."
             sleep 5
