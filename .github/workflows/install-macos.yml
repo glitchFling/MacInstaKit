@@ -1,0 +1,70 @@
+name: Download & Extract macOS Installer
+
+on:
+  workflow_dispatch:   # manual trigger only
+  # schedule:
+  #   - cron: "0 6 * * 1"   # weekly Monday 6am (optional)
+
+env:
+  DMG_URL: "https://updates.cdn-apple.com/2021/macos/041-7683-20210614-E610947E-C7CE-46EB-8860-D26D71F0D3EA/InstallMacOSX.dmg"
+  DMG_FILE: "InstallMacOSX.dmg"
+  WORK_DIR: "${{ github.workspace }}/macos-installer"
+
+jobs:
+  extract-installer:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            p7zip-full \
+            dmg2img \
+            curl \
+            wget
+
+      - name: Create working directory
+        run: mkdir -p "${{ env.WORK_DIR }}"
+
+      - name: Download macOS Installer DMG
+        run: |
+          echo "Downloading macOS installer DMG (~12 GB) ..."
+          until curl -f -L -C - -o "${{ env.WORK_DIR }}/${{ env.DMG_FILE }}" "${{ env.DMG_URL }}"; do
+            echo "Download interrupted or failed. Retrying in 5 seconds..."
+            sleep 5
+          done
+          ls -lh "${{ env.WORK_DIR }}/${{ env.DMG_FILE }}"
+
+      - name: Extract outer DMG
+        run: |
+          7z x "${{ env.WORK_DIR }}/${{ env.DMG_FILE }}" \
+            -o"${{ env.WORK_DIR }}/extracted" -y
+          ls -lh "${{ env.WORK_DIR }}/extracted/"
+
+      - name: Extract InstallOS.pkg
+        run: |
+          7z x "${{ env.WORK_DIR }}/extracted/InstallOS.pkg" \
+            -o"${{ env.WORK_DIR }}/extracted_pkg" -y
+          ls -lh "${{ env.WORK_DIR }}/extracted_pkg/"
+
+      - name: Convert InstallESD.dmg to raw image
+        run: |
+          dmg2img -i "${{ env.WORK_DIR }}/extracted_pkg/InstallESD.dmg" \
+                  -o "${{ env.WORK_DIR }}/InstallMacOSX.bin"
+          ls -lh "${{ env.WORK_DIR }}/InstallMacOSX.bin"
+
+      - name: List final output
+        run: find "${{ env.WORK_DIR }}" -maxdepth 2 -type f -exec ls -lh {} \;
+
+      - name: Upload final image as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: InstallMacOSX
+          path: |
+            ${{ env.WORK_DIR }}/InstallMacOSX.bin
+            ${{ env.WORK_DIR }}/${{ env.DMG_FILE }}
+          retention-days: 7
