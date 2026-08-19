@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Self-contained xar archive extractor. No pip packages needed."""
-import struct, gzip, xml.etree.ElementTree as ET, os, sys
+import struct, gzip, zlib, xml.etree.ElementTree as ET, os, sys
 
 def extract_xar(xar_path, out_dir):
     with open(xar_path, 'rb') as f:
@@ -14,7 +14,11 @@ def extract_xar(xar_path, out_dir):
         f.seek(header_size)
 
         toc_compressed = f.read(toc_csize)
-        toc_xml = gzip.decompress(toc_compressed).decode('utf-8')
+        # xar TOC uses either gzip or raw zlib (deflate)
+        if toc_compressed[:2] == b'\x1f\x8b':
+            toc_xml = gzip.decompress(toc_compressed).decode('utf-8')
+        else:
+            toc_xml = zlib.decompress(toc_compressed).decode('utf-8')
         root = ET.fromstring(toc_xml)
         heap_offset = header_size + toc_csize
 
@@ -38,7 +42,10 @@ def extract_xar(xar_path, out_dir):
                 try:
                     raw = gzip.decompress(raw)
                 except Exception:
-                    pass
+                    try:
+                        raw = zlib.decompress(raw)
+                    except Exception:
+                        pass
 
             out_path = os.path.join(out_dir, path)
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
