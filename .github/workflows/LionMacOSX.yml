@@ -1,7 +1,7 @@
 name: Download Lion 10.7
 
 on:
-  workflow_dispatch:   # manual trigger only
+  workflow_dispatch:   manual trigger
   # schedule:
   #   - cron: "0 6 * * 1"   # weekly Monday 6am (optional)
 
