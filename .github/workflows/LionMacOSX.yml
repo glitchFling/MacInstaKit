@@ -24,6 +24,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             p7zip-full \
             dmg2img \
+            xar \
+            zstd \
             curl \
             wget
 
@@ -43,19 +45,35 @@ jobs:
         run: |
           7z x "${{ env.WORK_DIR }}/${{ env.DMG_FILE }}" \
             -o"${{ env.WORK_DIR }}/extracted" -y
-          ls -lh "${{ env.WORK_DIR }}/extracted/"
+          find "${{ env.WORK_DIR }}/extracted" -maxdepth 3 -type f -o -type d | head -30
 
-      - name: Find and extract InstallOS.pkg
+      - name: Extract .pkg with xar
         run: |
-          PKG_PATH=$(find "${{ env.WORK_DIR }}/extracted" -name "InstallOS.pkg" -type f | head -1)
-          echo "Found InstallOS.pkg at: $PKG_PATH"
-          7z x "$PKG_PATH" -o"${{ env.WORK_DIR }}/extracted_pkg" -y
-          ls -lh "${{ env.WORK_DIR }}/extracted_pkg/"
+          PKG_PATH=$(find "${{ env.WORK_DIR }}/extracted" -name "*.pkg" -type f | head -1)
+          echo "Found .pkg at: $PKG_PATH"
+          ls -lh "$PKG_PATH"
+          mkdir -p "${{ env.WORK_DIR }}/extracted_pkg"
+          cd "${{ env.WORK_DIR }}/extracted_pkg"
+          xar -xf "$PKG_PATH"
+          echo "--- extracted files ---"
+          find "${{ env.WORK_DIR }}/extracted_pkg" -maxdepth 2 -type f
+
+      - name: Extract Payload (cpio.gz) to get InstallESD.dmg
+        run: |
+          PAYLOAD_PATH=$(find "${{ env.WORK_DIR }}/extracted_pkg" -name "Payload" -type f | head -1)
+          echo "Found Payload at: $PAYLOAD_PATH"
+          mkdir -p "${{ env.WORK_DIR }}/payload_out"
+          cd "${{ env.WORK_DIR }}/payload_out"
+          cat "$PAYLOAD_PATH" | gunzip -dc | cpio -idm 2>/dev/null || \
+            echo "Note: cpio may report blocks, that's normal"
+          echo "--- Payload contents ---"
+          find "${{ env.WORK_DIR }}/payload_out" -maxdepth 5 -type f | head -40
 
       - name: Convert InstallESD.dmg to raw image
         run: |
-          ESD_PATH=$(find "${{ env.WORK_DIR }}/extracted_pkg" -name "InstallESD.dmg" -type f | head -1)
+          ESD_PATH=$(find "${{ env.WORK_DIR }}/payload_out" -name "InstallESD.dmg" -type f | head -1)
           echo "Found InstallESD.dmg at: $ESD_PATH"
+          ls -lh "$ESD_PATH"
           dmg2img -i "$ESD_PATH" -o "${{ env.WORK_DIR }}/InstallMacOSX.bin"
           ls -lh "${{ env.WORK_DIR }}/InstallMacOSX.bin"
 
